@@ -105,5 +105,6 @@ if __name__ == "__main__":
                 test_count[1] += float(y.numel())
                 print(f"epoch {epoch} test stage: test_acc={test_count[0] / test_count[1]}")
         # 保存网络
-        torch.save(net.state_dict())
+        state = {'net':net.state_dict(), 'optimizer':trainer.state_dict(), 'epoch':epoch_nums}
+        torch.save(state, 'LeNet')
 
