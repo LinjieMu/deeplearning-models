@@ -2,7 +2,7 @@ import torch
 import torchvision.transforms
 from torch import nn
 from torch.utils import data
-
+import time
 
 # 定义模型
 class LeNet(nn.Module):
@@ -10,7 +10,6 @@ class LeNet(nn.Module):
     def __init__(self):
         super(LeNet, self).__init__()
         self.conv1 = nn.Conv2d(1, 6, kernel_size=5, padding=2)
-        self.sg = nn.Sigmoid()
         self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
         self.ft = nn.Flatten()
         self.fc1 = nn.Linear(16*5*5, 120)
@@ -49,13 +48,11 @@ def init_params(m):
         nn.init.xavier_normal_(m.weight)
 
 
-
-
 if __name__ == "__main__":
     # 超参数
     batch_size = 256
-    gpu_id = 2
-    lr = 0.1
+    gpu_id = 6
+    lr = 0.9
     epoch_nums = 10
     # 获取数据
     train_iter, test_iter = get_iter(batch_size=batch_size)
@@ -71,14 +68,15 @@ if __name__ == "__main__":
     trainer = torch.optim.SGD(net.parameters(), lr=lr)
     # 定义损失
     loss = nn.CrossEntropyLoss()
+    # 定义开始时间
+    time_start = time.time()
     # 训练
     for epoch in range(epoch_nums):
         # 训练损失之和，训练准确率之和，样本数
         count = [0.0, 0.0, 0.0]
         net.train()             # 进入训练模式
-        for i, (X, y) in enumerate(train_iter):
+        for X, y in train_iter:
             trainer.zero_grad()     # 梯度清零
-            y = y.type(torch.float32)
             X, y = X.to(device), y.to(device)
             y_hat = net(X)
             l = loss(y_hat, y)
@@ -86,16 +84,14 @@ if __name__ == "__main__":
             trainer.step()
             with torch.no_grad():
                 count[0] += l * y.numel()
-                count[1] += float(torch.sum(torch.argmax(net(X)) == y))
+                count[1] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
                 count[2] += y.numel()
-            if i % 5 == 0:
-                print(f"epoch {epoch} stage {i}: train_loss={count[0]/count[2]}, train_acc={count[1]/count[2]}")
+        print(f"epoch {epoch+1}: train_loss={count[0]/count[2] :0.3f}, train_acc={count[1]/count[2] :0.3f}", end=" ")
         net.eval()  # 设置为评估模式
         # 正确预测数，预测总数
         test_count = [0.0, 0.0]
         with torch.no_grad():
             for X, y in test_iter:
-                y = y.type(torch.float32)  # 调整y的数据类型与X一致
                 if isinstance(X, list):
                     X = [x.to(device) for x in X]
                 else:
@@ -103,8 +99,9 @@ if __name__ == "__main__":
                 y = y.to(device)
                 test_count[0] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
                 test_count[1] += float(y.numel())
-                print(f"epoch {epoch} test stage: test_acc={test_count[0] / test_count[1]}")
+        time_end = time.time()
+        print(f"test_acc={test_count[0] / test_count[1] :0.3f} time_cost={time_end-time_start} :.2f")
         # 保存网络
-        state = {'net':net.state_dict(), 'optimizer':trainer.state_dict(), 'epoch':epoch_nums}
-        torch.save(state, 'LeNet')
-
+    state = {'net': net.state_dict(), 'optimizer': trainer.state_dict(), 'epoch': epoch_nums}
+    torch.save(state, '../net/LeNet')
+    print(f"{epoch_nums*(test_count[1]+count[2])/(time_end-time_start) :.1f} examples/sec on cuda:0")
