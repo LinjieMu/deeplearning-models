@@ -4,6 +4,7 @@ from torch import nn
 from torch.utils import data
 import time
 
+
 # 定义模型
 class LeNet(nn.Module):
     # 模型初始化
@@ -104,4 +105,4 @@ if __name__ == "__main__":
         # 保存网络
     state = {'net': net.state_dict(), 'optimizer': trainer.state_dict(), 'epoch': epoch_nums}
     torch.save(state, '../net/LeNet')
-    print(f"{epoch_nums*(test_count[1]+count[2])/(time_end-time_start) :.1f} examples/sec on cuda:0")
+    print(f"{epoch_nums*(test_count[1]+count[2])/(time_end-time_start) :.1f} examples/sec on cuda:{gpu_id}")
