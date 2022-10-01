@@ -1,33 +1,16 @@
 import torch
+import time
+import torchvision
 from torch import nn
 from torch.utils import data
-import torchvision
-import time
 
 
-# 定义一个vgg块
-def vgg_block(num_convs, in_channels, out_channels):
-    layers = []
-    for _ in range(num_convs):
-        layers.append(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1))
-        layers.append(nn.ReLU())
-        in_channels = out_channels
-    layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
-    return nn.Sequential(*layers)
-
-
-# 将多个vgg块组和为一个网络
-def VGG(conv_arch):
-    conv_blks = []
-    in_channels = 1
-    for (num_convs, out_channels) in conv_arch:
-        conv_blks.append(vgg_block(num_convs, in_channels, out_channels))
-        in_channels = out_channels
+# 定义一个NiN块：NiN块有1个卷积层和两个1*1卷积层构成
+def nin_block(in_channels, out_channels, kernel_size, strides, padding):
     return nn.Sequential(
-        *conv_blks, nn.Flatten(),
-        nn.Linear(out_channels * 7 * 7, 4096), nn.ReLU(), nn.Dropout(p=0.5),
-        nn.Linear(4096, 4096), nn.ReLU(), nn.Dropout(p=0.5),
-        nn.Linear(4096, 10)
+        nn.Conv2d(in_channels, out_channels, kernel_size, strides, padding),nn.ReLU(),
+        nn.Conv2d(out_channels, out_channels, kernel_size=1), nn.ReLU(),
+        nn.Conv2d(out_channels, out_channels, kernel_size=1), nn.ReLU()
     )
 
 
@@ -55,7 +38,6 @@ def init_params(m):
 
 
 if __name__ == '__main__':
-    Note = open('../log/vgg_log.txt', mode='a+')
     # 超参数
     batch_size = 256
     gpu_id = 7
@@ -64,9 +46,26 @@ if __name__ == '__main__':
     # 获取数据集
     train_iter, test_iter = get_iter(batch_size=batch_size, resize=224)
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.device_count() > 7 else "cpu")
-    # 定义网路，初始化网络，将网络移到GPU中
-    conv_arch = ((1, 64), (1, 128), (2, 256), (2, 512), (2, 512))
-    net = VGG(conv_arch)
+    # 定义网络
+    net = nn.Sequential(
+        nin_block(1, 96, kernel_size=11, strides=4, padding=0),
+        nn.MaxPool2d(kernel_size=3, stride=2),
+        nin_block(96, 256, kernel_size=5, strides=1, padding=2),
+        nn.MaxPool2d(kernel_size=3, stride=2),
+        nin_block(256, 384, kernel_size=3, strides=1, padding=1),
+        nn.MaxPool2d(kernel_size=3, stride=2),
+        nn.Dropout(0.5),
+        # 标签类别数为10
+        nin_block(384, 10, kernel_size=3, strides=1, padding=1),
+        nn.AdaptiveAvgPool2d((1, 1)),
+        # 将四维张量转化为二维输出
+        nn.Flatten()
+    )
+    print(net)
+    X = torch.rand(size=(1, 1, 224, 224))
+    for layer in net:
+        X = layer(X)
+        print(layer.__class__.__name__, 'output shapes:\t', X.shape)
     net.apply(init_params)
     net.to(device)
     # 定义损失
@@ -76,7 +75,7 @@ if __name__ == '__main__':
     # 开始时间
     time_start = time.time()
     # 开始训练
-    Note.write("="*6+"Train Start"+"="*6+"\n")
+    print("=" * 6 + "Train Start" + "=" * 6 + "\n")
     for epoch in range(num_epochs):
         count_train = [0.0] * 3
         net.train()
@@ -91,10 +90,10 @@ if __name__ == '__main__':
                 count_train[0] += l * y.numel()
                 count_train[1] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
                 count_train[2] += y.numel()
-            print(f"epoch {epoch+1} - {count_train[2]}/{len(train_iter)*batch_size}: "
+            print(f"epoch {epoch + 1} - {count_train[2]}/{len(train_iter) * batch_size}: "
                   f"train_loss={count_train[0] / count_train[2] :.3f} "
                   f"train_acc={count_train[1] / count_train[2] :.3f}")
-        Note.write(f"epoch {epoch + 1}: train_loss={count_train[0] / count_train[2] :.3f} "
+        print(f"epoch {epoch + 1}: train_loss={count_train[0] / count_train[2] :.3f} "
                    f"train_acc={count_train[1] / count_train[2] :.3f} ")
         net.eval()
         count_test = [0.0] * 2
@@ -107,17 +106,15 @@ if __name__ == '__main__':
                 y = y.to(device)
                 count_test[0] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
                 count_test[1] += y.numel()
-                print(f"epoch {epoch+1} - {count_test[1]}/{len(test_iter) * batch_size}: "
+                print(f"epoch {epoch + 1} - {count_test[1]}/{len(test_iter) * batch_size}: "
                       f"test_acc={count_test[0] / count_test[1] :.3f} ")
         time_end = time.time()
-        Note.write(f"test_acc={count_test[0] / count_test[1] :.3f} "
+        print(f"test_acc={count_test[0] / count_test[1] :.3f} "
                    f"time_cost={time_end - time_start :.1f}\n")
     # 保存网络
     state = {'net': net.state_dict(),
              'optimizer': optimizer.state_dict(),
              'epoch': num_epochs}
-    torch.save(state, "../net/VGG")
-    Note.write(
-        f"{num_epochs * (count_train[2] + count_test[1]) / (time_end - time_start) :.1f} examples/sec on cuda:{gpu_id}\n")
-    Note.close()
-
+    torch.save(state, "../net/NiN")
+    print(f"{num_epochs * (count_train[2] + count_test[1]) / (time_end - time_start) :.1f}"
+          f" examples/sec on cuda:{gpu_id}\n")
