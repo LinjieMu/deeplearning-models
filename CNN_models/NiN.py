@@ -45,7 +45,7 @@ if __name__ == '__main__':
     lr = 0.1
     # 获取数据集
     train_iter, test_iter = get_iter(batch_size=batch_size, resize=224)
-    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.device_count() > 7 else "cpu")
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.device_count() > gpu_id else "cpu")
     # 定义网络
     net = nn.Sequential(
         nin_block(1, 96, kernel_size=11, strides=4, padding=0),
