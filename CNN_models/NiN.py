@@ -1,6 +1,8 @@
+import numpy as np
 import torch
 import time
 import torchvision
+from matplotlib import pyplot as plt
 from torch import nn
 from torch.utils import data
 
@@ -61,21 +63,18 @@ if __name__ == '__main__':
         # 将四维张量转化为二维输出
         nn.Flatten()
     )
-    print(net)
-    X = torch.rand(size=(1, 1, 224, 224))
-    for layer in net:
-        X = layer(X)
-        print(layer.__class__.__name__, 'output shapes:\t', X.shape)
     net.apply(init_params)
     net.to(device)
     # 定义损失
     loss = nn.CrossEntropyLoss()
     # 定义优化器
     optimizer = torch.optim.SGD(net.parameters(), lr=lr)
+    # 记录损失、训练精度和测试精度
+    mloss, mtracc, mteacc = \
+        torch.zeros(num_epochs), torch.zeros(num_epochs), torch.zeros(num_epochs)
     # 开始时间
     time_start = time.time()
     # 开始训练
-    print("=" * 6 + "Train Start" + "=" * 6 + "\n")
     for epoch in range(num_epochs):
         count_train = [0.0] * 3
         net.train()
@@ -90,11 +89,10 @@ if __name__ == '__main__':
                 count_train[0] += l * y.numel()
                 count_train[1] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
                 count_train[2] += y.numel()
-            print(f"epoch {epoch + 1} - {count_train[2]}/{len(train_iter) * batch_size}: "
-                  f"train_loss={count_train[0] / count_train[2] :.3f} "
-                  f"train_acc={count_train[1] / count_train[2] :.3f}")
-        print(f"epoch {epoch + 1}: train_loss={count_train[0] / count_train[2] :.3f} "
-                   f"train_acc={count_train[1] / count_train[2] :.3f} ")
+            time_end = time.time()
+            print(f"\repoch {epoch + 1} - training - {count_train[2]}/60000"
+                  f" examples: train_loss={count_train[0] / count_train[2] :.3f} "
+                  f"train_acc={count_train[1] / count_train[2] :.3f}", end="")
         net.eval()
         count_test = [0.0] * 2
         with torch.no_grad():
@@ -106,15 +104,34 @@ if __name__ == '__main__':
                 y = y.to(device)
                 count_test[0] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
                 count_test[1] += y.numel()
-                print(f"epoch {epoch + 1} - {count_test[1]}/{len(test_iter) * batch_size}: "
-                      f"test_acc={count_test[0] / count_test[1] :.3f} ")
+                time_end = time.time()
+                print(f"\repoch {epoch + 1} - testing - {count_test[1]}/10000"
+                      f" examples", end="")
         time_end = time.time()
-        print(f"test_acc={count_test[0] / count_test[1] :.3f} "
-                   f"time_cost={time_end - time_start :.1f}\n")
+        print(
+            f"\repoch {epoch + 1}: train_loss={count_train[0] / count_train[2] :.3f} "
+            f"train_acc={count_train[1] / count_train[2] :.3f} "
+            f"test_acc={count_test[0] / count_test[1] :.3f} "
+            f"time_cost={time_end - time_start :.1f}")
+        # 记录
+        mloss[epoch], mtracc[epoch], mteacc[epoch] = count_train[0] / count_train[2], \
+                                                     count_train[1] / count_train[2], \
+                                                     count_test[0] / count_test[1]
     # 保存网络
-    state = {'net': net.state_dict(),
-             'optimizer': optimizer.state_dict(),
-             'epoch': num_epochs}
-    torch.save(state, "../net/NiN")
-    print(f"{num_epochs * (count_train[2] + count_test[1]) / (time_end - time_start) :.1f}"
-          f" examples/sec on cuda:{gpu_id}\n")
+    # state = {'net': net.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': num_epochs}
+    # torch.save(state, "../net/NiN")
+    print(
+        f"{num_epochs * (count_train[2] + count_test[1]) / (time_end - time_start) :.1f} examples/sec on cuda:{gpu_id}")
+    # 绘制图像
+    plt.figure()
+    x = np.arange(1, num_epochs + 1)
+    plt.plot(x, mloss.detach().numpy(), label='loss', color='b')
+    plt.plot(x, mtracc.detach().numpy(), label='train_acc', color='k')
+    plt.plot(x, mteacc.detach().numpy(), label='test_acc', color='g')
+    plt.xlabel("epoch")
+    plt.title('NiN')
+    plt.legend(loc='best')
+    plt.show()
+    # plt.savefig('../result/NiN.png')
+
+

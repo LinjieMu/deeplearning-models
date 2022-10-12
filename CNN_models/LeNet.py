@@ -1,5 +1,7 @@
+import numpy as np
 import torch
 import torchvision.transforms
+from matplotlib import pyplot as plt
 from torch import nn
 from torch.utils import data
 import time
@@ -51,46 +53,50 @@ def init_params(m):
 
 if __name__ == "__main__":
     # 超参数
-    batch_size = 256
-    gpu_id = 6
+    batch_size = 512
+    gpu_id = 7
     lr = 0.9
-    epoch_nums = 10
+    num_epochs = 10
     # 获取数据
     train_iter, test_iter = get_iter(batch_size=batch_size)
     # 声明网络
     net = LeNet()
     # 获取gpu
-    device = torch.device(f'cuda:{gpu_id}')
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.device_count() > gpu_id else "cpu")
     # 将网络移到gpu
     net.to(device=device)
     # 初始化网络
     net.apply(init_params)
     # 定义优化器
-    trainer = torch.optim.SGD(net.parameters(), lr=lr)
+    optimizer = torch.optim.SGD(net.parameters(), lr=lr)
     # 定义损失
     loss = nn.CrossEntropyLoss()
-    # 定义开始时间
+    # 记录损失、训练精度和测试精度
+    mloss, mtracc, mteacc = \
+        torch.zeros(num_epochs), torch.zeros(num_epochs), torch.zeros(num_epochs)
+    # 开始时间
     time_start = time.time()
-    # 训练
-    for epoch in range(epoch_nums):
-        # 训练损失之和，训练准确率之和，样本数
-        count = [0.0, 0.0, 0.0]
-        net.train()             # 进入训练模式
+    # 开始训练
+    for epoch in range(num_epochs):
+        count_train = [0.0] * 3
+        net.train()
         for X, y in train_iter:
-            trainer.zero_grad()     # 梯度清零
+            optimizer.zero_grad()
             X, y = X.to(device), y.to(device)
             y_hat = net(X)
             l = loss(y_hat, y)
             l.backward()
-            trainer.step()
+            optimizer.step()
             with torch.no_grad():
-                count[0] += l * y.numel()
-                count[1] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
-                count[2] += y.numel()
-        print(f"epoch {epoch+1}: train_loss={count[0]/count[2] :0.3f}, train_acc={count[1]/count[2] :0.3f}", end=" ")
-        net.eval()  # 设置为评估模式
-        # 正确预测数，预测总数
-        test_count = [0.0, 0.0]
+                count_train[0] += l * y.numel()
+                count_train[1] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
+                count_train[2] += y.numel()
+            time_end = time.time()
+            print(f"\repoch {epoch + 1} - training - {count_train[2]}/60000"
+                  f" examples: train_loss={count_train[0] / count_train[2] :.3f} "
+                  f"train_acc={count_train[1] / count_train[2] :.3f}", end="")
+        net.eval()
+        count_test = [0.0] * 2
         with torch.no_grad():
             for X, y in test_iter:
                 if isinstance(X, list):
@@ -98,11 +104,35 @@ if __name__ == "__main__":
                 else:
                     X = X.to(device)
                 y = y.to(device)
-                test_count[0] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
-                test_count[1] += float(y.numel())
+                count_test[0] += float(torch.sum(torch.argmax(net(X), dim=1) == y))
+                count_test[1] += y.numel()
+                time_end = time.time()
+                print(f"\repoch {epoch + 1} - testing - {count_test[1]}/10000"
+                      f" examples", end="")
         time_end = time.time()
-        print(f"test_acc={test_count[0] / test_count[1] :0.3f} time_cost={time_end-time_start} :.2f")
-        # 保存网络
-    state = {'net': net.state_dict(), 'optimizer': trainer.state_dict(), 'epoch': epoch_nums}
-    torch.save(state, '../net/LeNet')
-    print(f"{epoch_nums*(test_count[1]+count[2])/(time_end-time_start) :.1f} examples/sec on cuda:{gpu_id}")
+        print(
+            f"\repoch {epoch + 1}: train_loss={count_train[0] / count_train[2] :.3f} "
+            f"train_acc={count_train[1] / count_train[2] :.3f} "
+            f"test_acc={count_test[0] / count_test[1] :.3f} "
+            f"time_cost={time_end - time_start :.1f}")
+        # 记录
+        mloss[epoch], mtracc[epoch], mteacc[epoch] = count_train[0] / count_train[2], \
+                                                     count_train[1] / count_train[2], \
+                                                     count_test[0] / count_test[1]
+    # 保存网络
+    # state = {'net': net.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': num_epochs}
+    # torch.save(state, "../net/LeNet")
+    print(
+        f"{num_epochs * (count_train[2] + count_test[1]) / (time_end - time_start) :.1f} examples/sec on cuda:{gpu_id}")
+    # 绘制图像
+    plt.figure()
+    x = np.arange(1, num_epochs + 1)
+    plt.plot(x, mloss.detach().numpy(), label='loss', color='b')
+    plt.plot(x, mtracc.detach().numpy(), label='train_acc', color='k')
+    plt.plot(x, mteacc.detach().numpy(), label='test_acc', color='g')
+    plt.xlabel("epoch")
+    plt.title('LeNet')
+    plt.legend(loc='best')
+    plt.show()
+    # plt.savefig('../result/LeNet.png')
+
